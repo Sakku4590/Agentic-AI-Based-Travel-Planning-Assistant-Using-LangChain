@@ -6,16 +6,28 @@ logger = get_logger(__name__)
 
 @tool
 def recommend_hotel(city: str, max_price: int):
-    """Recommend best hotel based on price & rating"""
+    """Recommend best hotel by stars within budget"""
     try:
         hotels = load_json("data/hotels.json")
+
         filtered = [
             h for h in hotels
-            if h["city"] == city and h["price_per_night"] <= max_price
+            if h.get("city") == city and h.get("price_per_night", 0) <= max_price
         ]
-        best = max(filtered, key=lambda x: x["rating"])
+
+        if not filtered:
+            logger.warning("No hotels found")
+            return {"error": "No hotels available"}
+
+        best = max(filtered, key=lambda x: x.get("stars", 0))
         logger.info("Hotel recommended successfully")
-        return best
+
+        return {
+            "name": best.get("name"),
+            "price_per_night": best.get("price_per_night"),
+            "stars": best.get("stars")
+        }
+
     except Exception as e:
         logger.error(f"Hotel recommendation failed: {e}")
-        return {"error": "Hotel recommendation failed"}
+        return {"error": str(e)}
