@@ -20,20 +20,24 @@ class TravelAgent:
             api_key=os.getenv("OPENAI_API_KEY")
         )
 
-    def run(self, user_query: str) -> str:
+    def run(self,user_query: str,source_city: str,destination_city: str,trip_days: int,hotel_budget: int) -> str:
         logger.info("Starting travel planning")
 
         # -------------------------------
         # Tool Calls
         # -------------------------------
         flight = search_flights.run({
-            "source": "Delhi",
-            "destination": "Goa"
+            "source": source_city,
+            "destination": destination_city
         })
+        
+        flight_note = ""
+        if "error" in flight:
+            flight_note = "⚠ No flight found in dataset"
 
         hotel = recommend_hotel.run({
-            "city": "Goa",
-            "max_price": 3500
+            "city": destination_city,
+            "max_price": hotel_budget
         })
 
         places = discover_places.run({
@@ -44,64 +48,105 @@ class TravelAgent:
             "lat": 15.2993,
             "lon": 74.1240
         })
+        logger.info(f"Weather raw response: {weather}")
+        
+        if flight.get("type") == "connecting":
+            airline = "Connecting Flight"
+            flight_price = flight.get("total_price", 0)
+            departure_time = flight["legs"][0].get("departure_time", "N/A")
+            flight_route = flight.get("route")
 
+        elif "price" in flight:
+            airline = flight.get("airline", "N/A")
+            flight_price = flight.get("price", 0)
+            departure_time = flight.get("departure_time", "N/A")
+            flight_route = f"{source_city} → {destination_city}"
+
+        else:
+            airline = "Not Available"
+            flight_price = 0
+            departure_time = "N/A"
+            flight_route = f"{source_city} → {destination_city}"
         # -------------------------------
         # Safe Value Extraction
         # -------------------------------
-        airline = flight.get("airline", "N/A")
-        flight_price = flight.get("price", 0)
-        departure_time = flight.get("departure_time", "N/A")
-
+        
         hotel_name = hotel.get("name", "N/A")
         hotel_price = hotel.get("price_per_night", 0)
         hotel_stars = hotel.get("stars", "N/A")
 
-        day1_weather = f"{weather[0]}°C" if len(weather) > 0 else "N/A"
-        day2_weather = f"{weather[1]}°C" if len(weather) > 1 else "N/A"
-        day3_weather = f"{weather[2]}°C" if len(weather) > 2 else "N/A"
+        temps = weather if isinstance(weather, list) else []
 
-        day1_places = ", ".join(places[:2]) if len(places) >= 2 else "City Exploration"
-        day2_places = ", ".join(places[2:4]) if len(places) >= 4 else "Local Sightseeing"
-        day3_places = places[4] if len(places) >= 5 else "Leisure / Shopping"
+        available_weather_days = len(temps)
 
-        hotel_total = hotel_price * 2
-        food_budget = 2500
+        if available_weather_days == 0:
+            final_days = trip_days
+        else:
+            final_days = min(trip_days, available_weather_days)
+
+        weather_lines = (
+            [f"Day {i+1}: {temps[i]}°C" for i in range(final_days)]
+            if temps else ["Weather data not available"]
+        )
+
+        # Ensure temps is a list
+        temps = temps if isinstance(temps, list) else []
+
+
+        # Ensure at least 1 day
+        if available_weather_days == 0:
+            final_days = trip_days
+        else:
+            final_days = min(trip_days, available_weather_days)
+
+        if not temps:
+            weather_lines = ["Weather data not available"]
+        else:
+            weather_lines = [f"Day {i+1}: {temps[i]}°C" for i in range(final_days)]
+    
+        itinerary = []
+        for i in range(final_days):
+            place_slice = places[i*2:(i+1)*2]
+            if place_slice:
+                itinerary.append(f"Day {i+1}: {', '.join(place_slice)}")
+            else:
+                itinerary.append(f"Day {i+1}: Leisure / Local Exploration")
+
+        hotel_total = hotel_price * final_days
+        food_budget = 1500 * final_days
         total_cost = flight_price + hotel_total + food_budget
 
         # -------------------------------
         # Prompt for Final Formatting
         # -------------------------------
         prompt = f"""
-You are a professional AI travel planner.
+        You are a professional AI travel planner.
 
-Generate the trip itinerary in EXACTLY the following format
-(no extra headings, no explanations):
+        Generate the trip itinerary in EXACTLY the following format
+        (no extra headings, no explanations):
 
-Your 3-Day Trip to Goa (Feb 12–14)
+        Your {final_days}-Day Trip to {destination_city}
 
-Flight Selected:
-- {airline} (₹{flight_price}) – Departs Delhi at {departure_time}
+        Flight Selected:
+        - {airline} (₹{flight_price}) – Route: {flight_route}
+        {flight_note}
 
-Hotel Booked:
-- {hotel_name} (₹{hotel_price}/night, {hotel_stars}-star)
+        Hotel Booked:
+        - {hotel_name} (₹{hotel_price}/night, {hotel_stars}-star)
 
-Weather:
-- Day 1: {day1_weather}
-- Day 2: {day2_weather}
-- Day 3: {day3_weather}
+        Weather:
+        {chr(10).join(weather_lines)}
 
-Itinerary:
-Day 1: {day1_places}
-Day 2: {day2_places}
-Day 3: {day3_places}
+        Itinerary:
+        {chr(10).join(itinerary)}
 
-Estimated Total Budget:
-- Flight: ₹{flight_price}
-- Hotel: ₹{hotel_total}
-- Food & Travel: ₹{food_budget}
--------------------------------------
-Total Cost: ₹{total_cost}
-"""
+        Estimated Total Budget:
+        - Flight: ₹{flight_price}
+        - Hotel: ₹{hotel_total}
+        - Food & Travel: ₹{food_budget}
+        -------------------------------------
+        Total Cost: ₹{total_cost}
+        """
 
         response = self.llm.invoke(prompt)
 

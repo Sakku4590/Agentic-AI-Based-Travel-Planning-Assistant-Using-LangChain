@@ -1,6 +1,7 @@
 import streamlit as st
 from agent.travel_agent import create_agent
 from utils.logger import get_logger
+from data.cities import INDIAN_CITIES
 
 logger = get_logger(__name__)
 
@@ -21,16 +22,26 @@ st.markdown(
 # -------------------------------
 # Sidebar Inputs
 # -------------------------------
+
 st.sidebar.header("Trip Details")
 
-source_city = st.sidebar.text_input(
+source_city = st.sidebar.selectbox(
     "Source City",
-    value="Delhi"
+    INDIAN_CITIES,
+    index=INDIAN_CITIES.index("Delhi")
 )
 
-destination_city = st.sidebar.text_input(
+destination_city = st.sidebar.selectbox(
     "Destination City",
-    value="Goa"
+    INDIAN_CITIES,
+    index=INDIAN_CITIES.index("Goa")
+)
+
+trip_days = st.sidebar.slider(
+    "Number of Days",
+    min_value=2,
+    max_value=10,
+    value=3
 )
 
 hotel_budget = st.sidebar.number_input(
@@ -40,6 +51,7 @@ hotel_budget = st.sidebar.number_input(
     value=3500,
     step=500
 )
+
 
 # -------------------------------
 # Generate Button
@@ -55,12 +67,18 @@ if st.button("🚀 Generate Trip Plan"):
                 agent = create_agent()
 
                 query = f"""
-                Plan a 3-day trip from {source_city} to {destination_city}.
+                Plan a {trip_days}-day trip from {source_city} to {destination_city}.
                 My hotel budget is {hotel_budget} per night.
                 Include flight, hotel, places, weather and total cost.
                 """
 
-                result = agent.run(query)
+                result = agent.run(
+                    user_query=query,
+                    source_city=source_city,
+                    destination_city=destination_city,
+                    trip_days=trip_days,
+                    hotel_budget=hotel_budget
+                )
 
                 st.success("Trip plan generated successfully!")
                 st.markdown("---")
